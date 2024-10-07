@@ -35,11 +35,6 @@ func decodeBencode(bencodedString string) (interface{}, error) {
 
 		return bencodedString[firstColonIndex+1 : firstColonIndex+1+length], nil
 	} else if rune(bencodedString[0]) == 'i' && rune(bencodedString[len(bencodedString)-1]) == 'e' {
-		ans, err := strconv.ParseInt(bencodedString[1:len(bencodedString)-1], 10, 64)
-		if err != nil {
-			return "", err
-		}
-		return ans, nil
 
 		return bencodedString[1 : len(bencodedString)-1], nil
 	} else {
