@@ -1,13 +1,112 @@
 package main
 
 import (
+	"bufio"
 	"encoding/json"
 	"fmt"
 	"os"
 	"strconv"
-	"unicode"
+	"strings"
 	// bencode "github.com/jackpal/bencode-go" // Available if you need it!
 )
+
+func NewDecoder(bencodedString string) *decoder {
+	return &decoder{
+		*bufio.NewReader(strings.NewReader(bencodedString)),
+	}
+}
+
+type decoder struct {
+	bufio.Reader
+}
+
+func (d *decoder) readIntUntil(delem byte) (int, error) {
+	slc, err := d.ReadSlice(delem)
+	str := string(slc[:len(slc)-1])
+	if err != nil {
+		return 0, err
+	}
+	number, err := strconv.ParseInt(str, 10, 64)
+	if err != nil {
+		return 0, err
+	}
+	return int(number), err
+}
+
+func (d *decoder) readString() (text interface{}, err error) {
+	length, err := d.readIntUntil(':')
+	if err != nil {
+		return "", err
+	}
+	sb := strings.Builder{}
+	for i := 0; i < length; i++ {
+		c, err := d.ReadByte()
+		if err != nil {
+			return "", nil
+		}
+		sb.WriteByte(c)
+	}
+	text = sb.String()
+	return text, err
+}
+
+func (d *decoder) readInt() (int, error) {
+	ans, err := d.readIntUntil('e')
+	if err != nil {
+		return 0, err
+	}
+	return ans, nil
+}
+
+func (d *decoder) readList() ([]interface{}, error) {
+	var res []interface{} = make([]interface{}, 0)
+	for {
+		ch, err := d.ReadByte()
+		if err != nil {
+			return nil, err
+		}
+		if ch == 'e' {
+			break
+		}
+		err = d.UnreadByte()
+		if err != nil {
+			return nil, err
+		}
+		text, err := d.readType()
+		if err != nil {
+			return nil, err
+		}
+		res = append(res, text)
+	}
+	return res, nil
+
+}
+
+func (d *decoder) readType() (text interface{}, err error) {
+
+	fb, err := d.ReadByte()
+	if err != nil {
+		return "", err
+	}
+	switch fb {
+	case 'i':
+		text, err = d.readInt()
+	case 'l':
+		text, err = d.readList()
+	default:
+		err = d.UnreadByte()
+		if err != nil {
+			return "", err
+		}
+		text, err = d.readString()
+	}
+	return text, err
+}
+
+func (d *decoder) Decode() (text interface{}, err error) {
+	text, err = d.readType()
+	return text, err
+}
 
 // Ensures gofmt doesn't remove the "os" encoding/json import (feel free to remove this!)
 var _ = json.Marshal
@@ -16,35 +115,9 @@ var _ = json.Marshal
 // - 5:hello -> hello
 // - 10:hello12345 -> hello12345
 func decodeBencode(bencodedString string) (interface{}, error) {
-	if unicode.IsDigit(rune(bencodedString[0])) {
-		var firstColonIndex int
-
-		for i := 0; i < len(bencodedString); i++ {
-			if bencodedString[i] == ':' {
-				firstColonIndex = i
-				break
-			}
-		}
-
-		lengthStr := bencodedString[:firstColonIndex]
-
-		length, err := strconv.Atoi(lengthStr)
-		if err != nil {
-			return "", err
-		}
-
-		return bencodedString[firstColonIndex+1 : firstColonIndex+1+length], nil
-	} else if rune(bencodedString[0]) == 'i' && rune(bencodedString[len(bencodedString)-1]) == 'e' {
-		ans, err := strconv.ParseInt(bencodedString[1:len(bencodedString)-1], 10, 64)
-		if err != nil {
-			return "", err
-		}
-		return ans, nil
-
-		return bencodedString[1 : len(bencodedString)-1], nil
-	} else {
-		return "", fmt.Errorf("Only strings are supported at the moment")
-	}
+	d := NewDecoder(bencodedString)
+	text, err := d.Decode()
+	return text, err
 }
 
 func main() {
