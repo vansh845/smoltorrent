@@ -4,15 +4,16 @@ import (
 	"bufio"
 	"encoding/json"
 	"fmt"
+	"io"
 	"os"
 	"strconv"
 	"strings"
 	// bencode "github.com/jackpal/bencode-go" // Available if you need it!
 )
 
-func NewDecoder(bencodedString string) *decoder {
+func NewDecoder(rdr io.Reader) *decoder {
 	return &decoder{
-		*bufio.NewReader(strings.NewReader(bencodedString)),
+		*bufio.NewReader(rdr),
 	}
 }
 
@@ -144,8 +145,8 @@ var _ = json.Marshal
 // Example:
 // - 5:hello -> hello
 // - 10:hello12345 -> hello12345
-func decodeBencode(bencodedString string) (interface{}, error) {
-	d := NewDecoder(bencodedString)
+func decodeBencode(bencodedRdr io.Reader) (interface{}, error) {
+	d := NewDecoder(bencodedRdr)
 	text, err := d.Decode()
 	return text, err
 }
@@ -161,7 +162,7 @@ func main() {
 		//
 		bencodedValue := os.Args[2]
 
-		decoded, err := decodeBencode(bencodedValue)
+		decoded, err := decodeBencode(strings.NewReader(bencodedValue))
 		if err != nil {
 			fmt.Println(err)
 			return
@@ -169,6 +170,35 @@ func main() {
 
 		jsonOutput, _ := json.Marshal(decoded)
 		fmt.Println(string(jsonOutput))
+	} else if command == "info" {
+
+		torrentFile := os.Args[2]
+
+		fd, err := os.Open(torrentFile)
+		if err != nil {
+			fmt.Println(err)
+			os.Exit(1)
+		}
+		decoder := NewDecoder(fd)
+		b, _ := decoder.ReadByte()
+		if b == 'd' {
+
+			mp, err := decoder.readDict()
+			if err != nil {
+				fmt.Println(err)
+				os.Exit(1)
+			}
+
+			info, ok := mp["info"].(map[string]interface{})
+			if !ok {
+				fmt.Println("something went wrong!")
+				os.Exit(1)
+			}
+
+			fmt.Printf("Tracker URL: %s\n", mp["announce"])
+			fmt.Printf("Length: %d\n", info["length"])
+
+		}
 	} else {
 		fmt.Println("Unknown command: " + command)
 		os.Exit(1)
