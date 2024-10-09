@@ -20,32 +20,11 @@ type decoder struct {
 	bufio.Reader
 }
 
-func (d *decoder) readDict() (map[string]interface{}, error) {
+func (d *decoder) readDict() (interface{}, error) {
 	var res = make(map[string]interface{})
 	for {
-		b, err := d.ReadByte()
-		if err != nil {
-			return res, err
-		}
-		if b == 'e' {
-			break
-		}
-		err = d.UnreadByte()
-		if err != nil {
-			return res, err
-		}
-		key, err := d.readString()
-		if err != nil {
-			return res, err
-		}
-		value, err := d.readType()
-		if err != nil {
-			return res, err
-		}
-		res[key] = value
+		d.readType()
 	}
-	return res, nil
-
 }
 
 func (d *decoder) readIntUntil(delem byte) (int, error) {
