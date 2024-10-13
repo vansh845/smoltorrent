@@ -2,14 +2,13 @@ package main
 
 import (
 	"bufio"
-	"crypto/sha1"
 	"encoding/json"
 	"fmt"
-	bencode "github.com/jackpal/bencode-go" // Available if you need it!
 	"io"
 	"os"
 	"strconv"
 	"strings"
+	// bencode "github.com/jackpal/bencode-go" // Available if you need it!
 )
 
 func NewDecoder(rdr io.Reader) *decoder {
@@ -196,15 +195,9 @@ func main() {
 				os.Exit(1)
 			}
 
+			fmt.Println(info)
 			fmt.Printf("Tracker URL: %s\n", mp["announce"])
 			fmt.Printf("Length: %d\n", info["length"])
-			h := sha1.New()
-			err = bencode.Marshal(h, info)
-			if err != nil {
-				fmt.Print(err)
-				os.Exit(1)
-			}
-			fmt.Printf("Info Hash: %x\n", h.Sum(nil))
 
 		}
 	} else {
