@@ -196,7 +196,7 @@ func main() {
 				os.Exit(1)
 			}
 
-			pieces := []byte(info["pieces"].(string))
+			// pieces := info["pieces"].([]byte)
 
 			fmt.Printf("Tracker URL: %s\n", mp["announce"])
 			fmt.Printf("Length: %d\n", info["length"])
@@ -208,10 +208,10 @@ func main() {
 			}
 			fmt.Printf("Info Hash: %x\n", h.Sum(nil))
 			fmt.Printf("Piece Length: %d\n", info["piece length"])
-			fmt.Println("Piece Hashes:")
-			printHex(pieces[:20])
-			printHex(pieces[20:40])
-			printHex(pieces[40:60])
+			fmt.Printf("Piece Hashes: %x", info["pieces"])
+			// printHex(pieces[:20])
+			// printHex(pieces[20:40])
+			// printHex(pieces[40:60])
 
 		}
 	} else {
