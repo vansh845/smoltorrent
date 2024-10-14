@@ -196,11 +196,17 @@ func main() {
 				os.Exit(1)
 			}
 
-			fmt.Println(info)
+			fmt.Println(info["pieces"])
+
 			fmt.Printf("Tracker URL: %s\n", mp["announce"])
 			fmt.Printf("Length: %d\n", info["length"])
 			h := sha1.New()
-			bencode
+			err = bencode.Marshal(h, info)
+			if err != nil {
+				fmt.Print(err)
+				os.Exit(1)
+			}
+			fmt.Printf("Info Hash: %x\n", h.Sum(nil))
 
 		}
 	} else {

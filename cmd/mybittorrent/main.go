@@ -196,6 +196,8 @@ func main() {
 				os.Exit(1)
 			}
 
+			pieces := []byte(info["pieces"].(string))
+
 			fmt.Printf("Tracker URL: %s\n", mp["announce"])
 			fmt.Printf("Length: %d\n", info["length"])
 			h := sha1.New()
@@ -205,10 +207,22 @@ func main() {
 				os.Exit(1)
 			}
 			fmt.Printf("Info Hash: %x\n", h.Sum(nil))
+			fmt.Printf("Piece Length: %d\n", info["piece length"])
+			fmt.Println("Piece Hashes:")
+			printHex(pieces[:20])
+			printHex(pieces[20:40])
+			printHex(pieces[40:60])
 
 		}
 	} else {
 		fmt.Println("Unknown command: " + command)
 		os.Exit(1)
 	}
+}
+
+func printHex(inp []byte) {
+	for _, x := range inp {
+		fmt.Printf("%02x", x)
+	}
+	fmt.Println()
 }
