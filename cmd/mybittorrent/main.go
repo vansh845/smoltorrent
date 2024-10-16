@@ -282,7 +282,6 @@ func main() {
 			peers := respMap["peers"].(string)
 			peerBytes := []byte(peers)
 			fmt.Println(len(peerBytes))
-			fmt.Println(len(peers))
 
 			fmt.Println(printPeer(peerBytes[:6]))
 			fmt.Println(printPeer(peerBytes[6:12]))
