@@ -4,12 +4,10 @@ import (
 	"bufio"
 	"crypto/rand"
 	"crypto/sha1"
-	"encoding/binary"
 	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
-	"net/url"
 	"os"
 	"strconv"
 	"strings"
@@ -185,7 +183,7 @@ func main() {
 			fmt.Println(err)
 			os.Exit(1)
 		}
-		defer fd.Close()
+    defer fd.Close()
 		decoder := NewDecoder(fd)
 		b, _ := decoder.ReadByte()
 		if b == 'd' {
@@ -217,7 +215,7 @@ func main() {
 			fmt.Printf("Piece Hashes: %x", info["pieces"])
 
 		}
-	} else if command == "peers" {
+  }else if command == "peers" {
 
 		torrentFile := os.Args[2]
 
@@ -226,7 +224,7 @@ func main() {
 			fmt.Println(err)
 			os.Exit(1)
 		}
-		defer fd.Close()
+    defer fd.Close()
 		decoder := NewDecoder(fd)
 		b, _ := decoder.ReadByte()
 		if b == 'd' {
@@ -242,68 +240,32 @@ func main() {
 				fmt.Println("something went wrong!")
 				os.Exit(1)
 			}
-
+      
 			h := sha1.New()
 			err = bencode.Marshal(h, info)
 			if err != nil {
 				fmt.Print(err)
 				os.Exit(1)
 			}
-			peer_id := make([]byte, 20)
-			baseUrl := mp["announce"].(string)
-			info_hash := h.Sum(nil)
-			port := "6881"
-			left := fmt.Sprintf("%d", info["length"])
+      peer_id = make([]byte,20)
+      baseUrl := mp["announce"]
+      info_hash := h.Sum(nil)
+      port := 6881
+      left := mp["Length"]
+      
+      rand.Read(peer_id)
+      url := fmt.Sprintf("%s?info_hash=%s&peer_id=%s&port=%d&uploaded=0&downloaded=0&left=%s&compact=1",baseurl,info_hash,string(peer_id),port)
+      req, _ := http.NewRequest("GET", baseUrl,nil)
 
-			rand.Read(peer_id)
-			params := url.Values{}
-			params.Add("info_hash", string(info_hash))
-			params.Add("peer_id", string(peer_id))
-			params.Add("port", port)
-			params.Add("uploaded", "0")
-			params.Add("downloaded", "0")
-			params.Add("left", left)
-			params.Add("compact", "1")
 
-			url := baseUrl + "?" + params.Encode()
-			resp, err := http.Get(url)
-			if err != nil {
-				fmt.Println(err)
-				os.Exit(1)
-			}
 
-			decoded, err := decodeBencode(resp.Body)
-			if err != nil {
-				fmt.Println(err)
-				os.Exit(1)
-			}
-			respMap := decoded.(map[string]interface{})
-			fmt.Println(respMap)
-			peers := respMap["peers"].(string)
-			peerBytes := []byte(peers)
-			fmt.Println(peerBytes)
-			fmt.Println(printPeer(peerBytes[:6]))
-			fmt.Println(printPeer(peerBytes[6:12]))
-			fmt.Println(printPeer(peerBytes[12:18]))
+
 
 		}
-	} else {
+  }
+  else {
 		fmt.Println("Unknown command: " + command)
 		os.Exit(1)
 	}
 }
 
-func printPeer(peer []byte) string {
-	sb := ""
-	for i, x := range peer[:4] {
-
-		sb += strconv.Itoa(int(x))
-		if i != 3 {
-			sb += "."
-		}
-	}
-	sb += ":"
-	port := binary.BigEndian.Uint16([]byte(peer[4:]))
-	sb += strconv.Itoa(int(port))
-	return sb
-}
