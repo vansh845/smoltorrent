@@ -278,10 +278,8 @@ func main() {
 				os.Exit(1)
 			}
 			respMap := decoded.(map[string]interface{})
-			fmt.Println(respMap)
 			peers := respMap["peers"].(string)
 			peerBytes := []byte(peers)
-			fmt.Println(len(peerBytes))
 
 			fmt.Println(printPeer(peerBytes[:6]))
 			fmt.Println(printPeer(peerBytes[6:12]))
