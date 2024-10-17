@@ -4,10 +4,13 @@ import (
 	"bufio"
 	"crypto/rand"
 	"crypto/sha1"
+	"encoding/binary"
 	"encoding/json"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
+	"net/url"
 	"os"
 	"strconv"
 	"strings"
@@ -155,6 +158,92 @@ func decodeBencode(bencodedRdr io.Reader) (interface{}, error) {
 	return text, err
 }
 
+func sendHandshake(peer string, msg []byte) {
+	conn, err := net.Dial("TCP", peer)
+	if err != nil {
+		fmt.Println(err)
+		os.Exit(1)
+	}
+	defer conn.Close()
+	n, err := conn.Write(msg)
+	if err != nil {
+		fmt.Println(err)
+		os.Exit(1)
+	}
+	fmt.Println(n)
+	io.Copy(conn, os.Stdout)
+
+}
+
+func getHandshake() ([]byte, []byte, []byte) {
+
+	torrentFile := os.Args[2]
+
+	fd, err := os.Open(torrentFile)
+	if err != nil {
+		fmt.Println(err)
+		os.Exit(1)
+	}
+	defer fd.Close()
+	decoder := NewDecoder(fd)
+	b, _ := decoder.ReadByte()
+	if b == 'd' {
+
+		mp, err := decoder.readDict()
+		if err != nil {
+			fmt.Println(err)
+			os.Exit(1)
+		}
+
+		info, ok := mp["info"].(map[string]interface{})
+		if !ok {
+			fmt.Println("something went wrong!")
+			os.Exit(1)
+		}
+
+		h := sha1.New()
+		err = bencode.Marshal(h, info)
+		if err != nil {
+			fmt.Print(err)
+			os.Exit(1)
+		}
+		peer_id := make([]byte, 20)
+		baseUrl := mp["announce"].(string)
+		info_hash := h.Sum(nil)
+		port := "6881"
+		left := fmt.Sprintf("%d", info["length"])
+
+		rand.Read(peer_id)
+		params := url.Values{}
+		params.Add("info_hash", string(info_hash))
+		params.Add("peer_id", string(peer_id))
+		params.Add("port", port)
+		params.Add("uploaded", "0")
+		params.Add("downloaded", "0")
+		params.Add("left", left)
+		params.Add("compact", "1")
+
+		url := baseUrl + "?" + params.Encode()
+		resp, err := http.Get(url)
+		if err != nil {
+			fmt.Println(err)
+			os.Exit(1)
+		}
+
+		decoded, err := decodeBencode(resp.Body)
+		if err != nil {
+			fmt.Println(err)
+			os.Exit(1)
+		}
+		respMap := decoded.(map[string]interface{})
+		peers := respMap["peers"].(string)
+		peerBytes := []byte(peers)
+		return peerBytes, info_hash, peer_id
+	}
+
+	return nil, nil, nil
+}
+
 func main() {
 	// You can use print statements as follows for debugging, they'll be visible when running tests.
 	// fmt.Println("Logs from your program will appear here!")
@@ -183,7 +272,7 @@ func main() {
 			fmt.Println(err)
 			os.Exit(1)
 		}
-    defer fd.Close()
+		defer fd.Close()
 		decoder := NewDecoder(fd)
 		b, _ := decoder.ReadByte()
 		if b == 'd' {
@@ -215,57 +304,45 @@ func main() {
 			fmt.Printf("Piece Hashes: %x", info["pieces"])
 
 		}
-  }else if command == "peers" {
+	} else if command == "peers" {
 
-		torrentFile := os.Args[2]
+		peerBytes, _, _ := getHandshake()
+		fmt.Println(printPeer(peerBytes[:6]))
+		fmt.Println(printPeer(peerBytes[6:12]))
+		fmt.Println(printPeer(peerBytes[12:18]))
 
-		fd, err := os.Open(torrentFile)
-		if err != nil {
-			fmt.Println(err)
-			os.Exit(1)
-		}
-    defer fd.Close()
-		decoder := NewDecoder(fd)
-		b, _ := decoder.ReadByte()
-		if b == 'd' {
+	} else if command == "handshake" {
 
-			mp, err := decoder.readDict()
-			if err != nil {
-				fmt.Println(err)
-				os.Exit(1)
-			}
+		ipaddr := os.Args[3]
 
-			info, ok := mp["info"].(map[string]interface{})
-			if !ok {
-				fmt.Println("something went wrong!")
-				os.Exit(1)
-			}
-      
-			h := sha1.New()
-			err = bencode.Marshal(h, info)
-			if err != nil {
-				fmt.Print(err)
-				os.Exit(1)
-			}
-      peer_id = make([]byte,20)
-      baseUrl := mp["announce"]
-      info_hash := h.Sum(nil)
-      port := 6881
-      left := mp["Length"]
-      
-      rand.Read(peer_id)
-      url := fmt.Sprintf("%s?info_hash=%s&peer_id=%s&port=%d&uploaded=0&downloaded=0&left=%s&compact=1",baseurl,info_hash,string(peer_id),port)
-      req, _ := http.NewRequest("GET", baseUrl,nil)
+		peers, info_hash, peer_id := getHandshake()
+		msg := make([]byte, 0)
+		msg = append(msg, 19)
+		protocol := []byte("BitTorrent protocol")
+		msg = append(msg, protocol...)
+		reserved := make([]byte, 8)
+		msg = append(msg, reserved...)
 
+		msg = append(msg, info_hash...)
+		msg = append(msg, peer_id...)
 
-
-
-
-		}
-  }
-  else {
+	} else {
 		fmt.Println("Unknown command: " + command)
 		os.Exit(1)
 	}
 }
 
+func printPeer(peer []byte) string {
+	sb := ""
+	for i, x := range peer[:4] {
+
+		sb += strconv.Itoa(int(x))
+		if i != 3 {
+			sb += "."
+		}
+	}
+	sb += ":"
+	port := binary.BigEndian.Uint16([]byte(peer[4:]))
+	sb += strconv.Itoa(int(port))
+	return sb
+}
