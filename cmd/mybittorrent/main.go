@@ -178,7 +178,6 @@ func sendHandshake(peer string, msg []byte) {
 		fmt.Println(err)
 		os.Exit(1)
 	}
-
 	fmt.Printf("Peer ID: %s\n", hex.EncodeToString(buff[48:]))
 
 }
