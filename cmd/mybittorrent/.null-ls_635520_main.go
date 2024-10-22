@@ -5,15 +5,18 @@ import (
 	"crypto/rand"
 	"crypto/sha1"
 	"encoding/binary"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"io"
+	"math"
 	"net"
 	"net/http"
 	"net/url"
 	"os"
 	"strconv"
 	"strings"
+	"time"
 
 	bencode "github.com/jackpal/bencode-go" // Available if you need it!
 )
@@ -26,6 +29,34 @@ func NewDecoder(rdr io.Reader) *decoder {
 
 type decoder struct {
 	bufio.Reader
+}
+
+func toStruct(mp map[string]interface{}) *Torrent {
+	res := Torrent{}
+	res.Url = mp["announce"].(string)
+	res.CreatedBy = mp["created by"].(string)
+
+	infoMp := mp["info"].(map[string]interface{})
+	res.TorrentInfo = Info{
+		InfoLength:  infoMp["length"].(int),
+		Name:        infoMp["name"].(string),
+		PieceLength: infoMp["piece length"].(int),
+		Pieces:      infoMp["pieces"],
+	}
+	return &res
+}
+
+type Torrent struct {
+	Url         string
+	CreatedBy   string
+	TorrentInfo Info
+}
+
+type Info struct {
+	InfoLength  int
+	Name        string
+	PieceLength int
+	Pieces      interface{}
 }
 
 func (d *decoder) readDict() (map[string]interface{}, error) {
@@ -158,26 +189,29 @@ func decodeBencode(bencodedRdr io.Reader) (interface{}, error) {
 	return text, err
 }
 
-func sendHandshake(peer string, msg []byte) {
-	conn, err := net.Dial("TCP", peer)
+func sendHandshake(peer string, msg []byte) (net.Conn, []byte) {
+	conn, err := net.Dial("tcp", peer)
 	if err != nil {
 		fmt.Println(err)
 		os.Exit(1)
 	}
-	defer conn.Close()
 	n, err := conn.Write(msg)
 	if err != nil {
 		fmt.Println(err)
 		os.Exit(1)
 	}
-	fmt.Println(n)
-	io.Copy(conn, os.Stdout)
 
+	buff := make([]byte, n)
+	_, err = conn.Read(buff)
+	if err != nil {
+		fmt.Println(err)
+		os.Exit(1)
+	}
+
+	return conn, buff
 }
 
-func getHandshake() ([]byte, []byte, []byte) {
-
-	torrentFile := os.Args[2]
+func getHandshake(torrentFile string) ([]byte, []byte, []byte) {
 
 	fd, err := os.Open(torrentFile)
 	if err != nil {
@@ -282,8 +316,8 @@ func main() {
 				fmt.Println(err)
 				os.Exit(1)
 			}
-
 			info, ok := mp["info"].(map[string]interface{})
+
 			if !ok {
 				fmt.Println("something went wrong!")
 				os.Exit(1)
@@ -301,12 +335,12 @@ func main() {
 			}
 			fmt.Printf("Info Hash: %x\n", h.Sum(nil))
 			fmt.Printf("Piece Length: %d\n", info["piece length"])
-			fmt.Printf("Piece Hashes: %x", info["pieces"])
+			fmt.Printf("Piece Hashes: %x\n", info["pieces"])
 
 		}
 	} else if command == "peers" {
 
-		peerBytes, _, _ := getHandshake()
+		peerBytes, _, _ := getHandshake(os.Args[2])
 		fmt.Println(printPeer(peerBytes[:6]))
 		fmt.Println(printPeer(peerBytes[6:12]))
 		fmt.Println(printPeer(peerBytes[12:18]))
@@ -315,7 +349,7 @@ func main() {
 
 		ipaddr := os.Args[3]
 
-		peers, info_hash, peer_id := getHandshake()
+		_, info_hash, peer_id := getHandshake(os.Args[2])
 		msg := make([]byte, 0)
 		msg = append(msg, 19)
 		protocol := []byte("BitTorrent protocol")
@@ -325,7 +359,135 @@ func main() {
 
 		msg = append(msg, info_hash...)
 		msg = append(msg, peer_id...)
+		_, buff := sendHandshake(ipaddr, msg)
 
+		fmt.Printf("Peer ID: %s\n", hex.EncodeToString(buff[48:]))
+
+	} else if command == "download_piece" {
+
+		torrentFile := os.Args[4]
+		peerBytes, _, _ := getHandshake(torrentFile)
+		ipaddr := printPeer(peerBytes[12:18])
+		fmt.Println(ipaddr)
+
+		fd, err := os.Open(torrentFile)
+		if err != nil {
+			fmt.Println(err)
+			os.Exit(1)
+		}
+		defer fd.Close()
+		decoder := NewDecoder(fd)
+		b, _ := decoder.ReadByte()
+		if b == 'd' {
+
+			mp, err := decoder.readDict()
+			if err != nil {
+				fmt.Println(err)
+				os.Exit(1)
+			}
+			// infoMp, ok := mp["info"].(map[string]interface{})
+
+			// if !ok {
+			// 	fmt.Println("something went wrong!")
+			// 	os.Exit(1)
+			// }
+
+			info := toStruct(mp)
+
+			_, info_hash, peer_id := getHandshake(torrentFile)
+			msg := make([]byte, 0)
+			msg = append(msg, 19)
+			protocol := []byte("BitTorrent protocol")
+			msg = append(msg, protocol...)
+			reserved := make([]byte, 8)
+			msg = append(msg, reserved...)
+
+			msg = append(msg, info_hash...)
+			msg = append(msg, peer_id...)
+			conn, buff := sendHandshake(ipaddr, msg)
+			fmt.Println(string(buff))
+
+			// fmt.Println(string(buff))
+			tmp := make([]byte, 16)
+			// read bitfield message
+			n, err := conn.Read(tmp)
+			if err != nil {
+				fmt.Println(err)
+				os.Exit(1)
+			}
+			fmt.Printf("read %d bytes\n", n)
+			fmt.Println(tmp[:n])
+			// send intereseted
+			interested := make([]byte, 4)
+			binary.BigEndian.PutUint32(interested, 1)
+			interested = append(interested, 2)
+			conn.Write(interested)
+
+			// wait for unchoke
+			n, err = conn.Read(tmp)
+			if err != nil {
+				fmt.Println(err)
+				os.Exit(1)
+			}
+			fmt.Printf("%d bytes read\n", n)
+			fmt.Println(tmp[:n])
+
+			// send request message
+
+			length := info.TorrentInfo.InfoLength
+			blockSize := 16 * 1024
+
+			blocks := int(math.Ceil(float64(length) / float64(info.TorrentInfo.PieceLength)))
+
+			for i := 0; i < blocks; i++ {
+
+				request := make([]byte, 4)
+				binary.BigEndian.PutUint32(request, 13)
+				request = append(request, 6)
+				buff := make([]byte, 4)
+				binary.BigEndian.PutUint32(buff, uint32(i))
+				request = append(request, buff...)
+				binary.BigEndian.PutUint32(buff, uint32(i*blockSize))
+				request = append(request, buff...)
+				if i == blocks-1 {
+					left := length % blockSize
+					binary.BigEndian.PutUint32(buff, uint32(left))
+
+				} else {
+					binary.BigEndian.PutUint32(buff, uint32(blockSize))
+				}
+
+				request = append(request, buff...)
+
+				_, err := conn.Write(request)
+				if err != nil {
+					fmt.Println(err)
+					os.Exit(1)
+				}
+				time.Sleep(time.Millisecond * 1500)
+
+				resBuf := make([]byte, 4)
+				_, err = conn.Read(resBuf)
+				if err != nil {
+					fmt.Println("error reading prefix length", err)
+					os.Exit(1)
+				}
+				respLength := binary.BigEndian.Uint32(resBuf)
+				fmt.Println(respLength)
+				newBuff := make([]byte, respLength)
+
+				n, err = io.ReadFull(conn, newBuff)
+
+				if err != nil {
+					fmt.Println(err)
+					os.Exit(1)
+				}
+				fmt.Printf("%d bytes read\n", n)
+				fmt.Println(newBuff[0])
+
+			}
+
+		}
 	} else {
 		fmt.Println("Unknown command: " + command)
 		os.Exit(1)
