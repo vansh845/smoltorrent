@@ -539,8 +539,6 @@ func main() {
 
 		torrentFile := os.Args[4]
 		peerBytes, _, _ := getHandshake(torrentFile)
-		ipaddr := printPeer(peerBytes[12:18])
-		fmt.Println(ipaddr)
 
 		fd, err := os.Open(torrentFile)
 		if err != nil {
@@ -569,48 +567,62 @@ func main() {
 			}
 		}
 
-		_, info_hash, peer_id := getHandshake(torrentFile)
-		msg := make([]byte, 0)
-		msg = append(msg, 19)
-		protocol := []byte("BitTorrent protocol")
-		msg = append(msg, protocol...)
-		reserved := make([]byte, 8)
-		msg = append(msg, reserved...)
-
-		msg = append(msg, info_hash...)
-		msg = append(msg, peer_id...)
-		conn, buff := sendHandshake(ipaddr, msg)
-		fmt.Println(string(buff))
-		// fmt.Println(string(buff))
-		tmp := make([]byte, 16)
-		// read bitfield message
-		n, err := conn.Read(tmp)
-		if err != nil {
-			fmt.Println(err)
-			os.Exit(1)
-		}
-		fmt.Printf("read %d bytes\n", n)
-		fmt.Println(tmp[:n])
-		// send intereseted
-		interested := make([]byte, 4)
-		binary.BigEndian.PutUint32(interested, 1)
-		interested = append(interested, 2)
-		conn.Write(interested)
-
-		// wait for unchoke
-		n, err = conn.Read(tmp)
-		if err != nil {
-			fmt.Println(err)
-			os.Exit(1)
-		}
-		fmt.Printf("%d bytes read\n", n)
-		fmt.Println(tmp[:n])
 		wg := sync.WaitGroup{}
+		peers := make([]string, 0)
 
+		for i := 0; i < len(peerBytes); i = i + 6 {
+
+			ipaddr := printPeer(peerBytes[i : i+6])
+			if ipaddr == "0.0.0.0" {
+				continue
+			}
+			peers = append(peers, ipaddr)
+		}
+		fmt.Println(peers)
 		for i := 0; i < info.TorrentInfo.Len; i++ {
 			wg.Add(1)
+			go func(wg *sync.WaitGroup) {
+				defer wg.Done()
 
-			downloadPiece(conn, i, *info, &wg)
+				_, info_hash, peer_id := getHandshake(torrentFile)
+				msg := make([]byte, 0)
+				msg = append(msg, 19)
+				protocol := []byte("BitTorrent protocol")
+				msg = append(msg, protocol...)
+				reserved := make([]byte, 8)
+				msg = append(msg, reserved...)
+
+				msg = append(msg, info_hash...)
+				msg = append(msg, peer_id...)
+				ipaddr := peers[i%len(peers)]
+				conn, buff := sendHandshake(ipaddr, msg)
+				fmt.Println(string(buff))
+				// fmt.Println(string(buff))
+				tmp := make([]byte, 16)
+				// read bitfield message
+				n, err := conn.Read(tmp)
+				if err != nil {
+					fmt.Println(err)
+					os.Exit(1)
+				}
+				fmt.Printf("read %d bytes\n", n)
+				fmt.Println(tmp[:n])
+				// send intereseted
+				interested := make([]byte, 4)
+				binary.BigEndian.PutUint32(interested, 1)
+				interested = append(interested, 2)
+				conn.Write(interested)
+
+				// wait for unchoke
+				n, err = conn.Read(tmp)
+				if err != nil {
+					fmt.Println(err)
+					os.Exit(1)
+				}
+				fmt.Printf("%d bytes read\n", n)
+				fmt.Println(tmp[:n])
+				downloadPiece(conn, i, *info)
+			}(&wg)
 		}
 		wg.Wait()
 		files, err := os.ReadDir("pieces")
@@ -650,8 +662,7 @@ func printPeer(peer []byte) string {
 	return sb
 }
 
-func downloadPiece(conn net.Conn, index int, info Torrent, wg *sync.WaitGroup) []byte {
-	defer wg.Done()
+func downloadPiece(conn net.Conn, index int, info Torrent) []byte {
 
 	// send request message
 
