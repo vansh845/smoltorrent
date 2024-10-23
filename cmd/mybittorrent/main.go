@@ -192,8 +192,81 @@ func decodeBencode(bencodedRdr io.Reader) (interface{}, error) {
 	return text, err
 }
 
-func sendHandshake(peer string, msg []byte) (net.Conn, []byte) {
-	conn, err := net.Dial("tcp", peer)
+func discoverPeers(mp map[string]interface{}, peer_id, info_hash []byte) []byte {
+
+	info := mp["info"].(map[string]interface{})
+
+	fmt.Println(string(peer_id))
+	fmt.Println(string(info_hash))
+	h := sha1.New()
+	err := bencode.Marshal(h, info)
+	if err != nil {
+		fmt.Print(err)
+		os.Exit(1)
+	}
+	baseUrl := mp["announce"].(string)
+	port := "6881"
+	left := fmt.Sprintf("%d", info["length"])
+
+	params := url.Values{}
+	params.Add("info_hash", string(info_hash))
+	params.Add("peer_id", string(peer_id))
+	params.Add("port", port)
+	params.Add("uploaded", "0")
+	params.Add("downloaded", "0")
+	params.Add("left", left)
+	params.Add("compact", "1")
+
+	url := baseUrl + "?" + params.Encode()
+	resp, err := http.Get(url)
+	if err != nil {
+		fmt.Println(err)
+		os.Exit(1)
+	}
+
+	decoded, err := decodeBencode(resp.Body)
+	if err != nil {
+		fmt.Println(err)
+		os.Exit(1)
+	}
+	respMap := decoded.(map[string]interface{})
+	fmt.Println(respMap)
+	peers := respMap["peers"].(string)
+	return []byte(peers)
+}
+
+func sendHandshake(peerAddr string, mp map[string]interface{}) (net.Conn, []byte) {
+
+	info, ok := mp["info"].(map[string]interface{})
+	if !ok {
+		panic("info not a map")
+	}
+	peer_id := make([]byte, 20)
+	rand.Read(peer_id)
+	h := sha1.New()
+	err := bencode.Marshal(h, info)
+	if err != nil {
+		fmt.Print(err)
+		os.Exit(1)
+	}
+	info_hash := h.Sum(nil)
+	peerBytes := discoverPeers(mp, peer_id, info_hash)
+	nPeers := len(peerBytes) / 6
+	peerAddrs := make([]string, 0)
+	for i := 0; i < nPeers; i++ {
+		peerAddrs = append(peerAddrs, printPeer(peerBytes[(i)*6:(i+1)*6]))
+	}
+
+	msg := make([]byte, 0)
+	msg = append(msg, 19)
+	protocol := []byte("BitTorrent protocol")
+	msg = append(msg, protocol...)
+	reserved := make([]byte, 8)
+	msg = append(msg, reserved...)
+
+	msg = append(msg, info_hash...)
+	msg = append(msg, peer_id...)
+	conn, err := net.Dial("tcp", peerAddr)
 	if err != nil {
 		fmt.Println(err)
 		os.Exit(1)
@@ -212,73 +285,6 @@ func sendHandshake(peer string, msg []byte) (net.Conn, []byte) {
 	}
 
 	return conn, buff
-}
-
-func getHandshake(torrentFile string) ([]byte, []byte, []byte) {
-
-	fd, err := os.Open(torrentFile)
-	if err != nil {
-		panic(err)
-	}
-	defer fd.Close()
-	decoder := NewDecoder(fd)
-	b, _ := decoder.ReadByte()
-	if b == 'd' {
-
-		mp, err := decoder.readDict()
-		if err != nil {
-			fmt.Println(err)
-			os.Exit(1)
-		}
-
-		info, ok := mp["info"].(map[string]interface{})
-		if !ok {
-			fmt.Println("something went wrong!")
-			os.Exit(1)
-		}
-
-		h := sha1.New()
-		err = bencode.Marshal(h, info)
-		if err != nil {
-			fmt.Print(err)
-			os.Exit(1)
-		}
-		peer_id := make([]byte, 20)
-		baseUrl := mp["announce"].(string)
-		info_hash := h.Sum(nil)
-		port := "6881"
-		left := fmt.Sprintf("%d", info["length"])
-
-		rand.Read(peer_id)
-		params := url.Values{}
-		params.Add("info_hash", string(info_hash))
-		params.Add("peer_id", string(peer_id))
-		params.Add("port", port)
-		params.Add("uploaded", "0")
-		params.Add("downloaded", "0")
-		params.Add("left", left)
-		params.Add("compact", "1")
-
-		url := baseUrl + "?" + params.Encode()
-		resp, err := http.Get(url)
-		if err != nil {
-			fmt.Println(err)
-			os.Exit(1)
-		}
-
-		decoded, err := decodeBencode(resp.Body)
-		if err != nil {
-			fmt.Println(err)
-			os.Exit(1)
-		}
-		respMap := decoded.(map[string]interface{})
-		peers := respMap["peers"].(string)
-		peerBytes := []byte(peers)
-		return peerBytes, info_hash, peer_id
-	}
-
-	fmt.Println("error not dict")
-	return nil, nil, nil
 }
 
 func main() {
@@ -312,38 +318,76 @@ func main() {
 		defer fd.Close()
 		decoder := NewDecoder(fd)
 		b, _ := decoder.ReadByte()
-		if b == 'd' {
-
-			mp, err := decoder.readDict()
-			if err != nil {
-				fmt.Println(err)
-				os.Exit(1)
-			}
-			info, ok := mp["info"].(map[string]interface{})
-
-			if !ok {
-				fmt.Println("something went wrong!")
-				os.Exit(1)
-			}
-
-			// pieces := info["pieces"].([]byte)
-
-			fmt.Printf("Tracker URL: %s\n", mp["announce"])
-			fmt.Printf("Length: %d\n", info["length"])
-			h := sha1.New()
-			err = bencode.Marshal(h, info)
-			if err != nil {
-				fmt.Print(err)
-				os.Exit(1)
-			}
-			fmt.Printf("Info Hash: %x\n", h.Sum(nil))
-			fmt.Printf("Piece Length: %d\n", info["piece length"])
-			fmt.Printf("Piece Hashes: %x\n", info["pieces"])
-
+		if b != 'd' {
+			fmt.Println("not a dictionary")
+			os.Exit(1)
 		}
+
+		mp, err := decoder.readDict()
+		if err != nil {
+			fmt.Println(err)
+			os.Exit(1)
+		}
+		info, ok := mp["info"].(map[string]interface{})
+
+		if !ok {
+			fmt.Println("something went wrong!")
+			os.Exit(1)
+		}
+
+		s := toStruct(mp)
+		fmt.Println(info)
+		// pieces := info["pieces"].([]byte)
+
+		fmt.Printf("Tracker URL: %s\n", s.Url)
+		fmt.Printf("Length: %d\n", s.TorrentInfo.InfoLength)
+		h := sha1.New()
+		err = bencode.Marshal(h, info)
+		if err != nil {
+			fmt.Print(err)
+			os.Exit(1)
+		}
+		fmt.Printf("Info Hash: %x\n", h.Sum(nil))
+		fmt.Printf("Piece Length: %d\n", s.TorrentInfo.PieceLength)
+		fmt.Printf("Piece Hashes: %x\n", s.TorrentInfo.Pieces)
+
 	} else if command == "peers" {
 
-		peerBytes, _, _ := getHandshake(os.Args[2])
+		torrentFile := os.Args[2]
+		fd, err := os.Open(torrentFile)
+		if err != nil {
+			panic(err)
+		}
+		defer fd.Close()
+		decoder := NewDecoder(fd)
+		b, _ := decoder.ReadByte()
+		if b != 'd' {
+			fmt.Println("not a dict")
+			panic("owww...")
+		}
+
+		mp, err := decoder.readDict()
+		if err != nil {
+			fmt.Println(err)
+			os.Exit(1)
+		}
+		info, ok := mp["info"].(map[string]interface{})
+
+		if !ok {
+			fmt.Println("something went wrong!")
+			os.Exit(1)
+		}
+
+		peer_id := make([]byte, 20)
+		rand.Read(peer_id)
+		h := sha1.New()
+		err = bencode.Marshal(h, info)
+		if err != nil {
+			fmt.Print(err)
+			os.Exit(1)
+		}
+		info_hash := h.Sum(nil)
+		peerBytes := discoverPeers(mp, peer_id, info_hash)
 		fmt.Println(printPeer(peerBytes[:6]))
 		fmt.Println(printPeer(peerBytes[6:12]))
 		fmt.Println(printPeer(peerBytes[12:18]))
@@ -351,18 +395,26 @@ func main() {
 	} else if command == "handshake" {
 
 		ipaddr := os.Args[3]
+		torrentFile := os.Args[4]
+		fd, err := os.Open(torrentFile)
+		if err != nil {
+			panic(err)
+		}
+		defer fd.Close()
+		decoder := NewDecoder(fd)
+		b, _ := decoder.ReadByte()
+		if b != 'd' {
+			fmt.Println("not a dict")
+			panic("owww...")
+		}
 
-		_, info_hash, peer_id := getHandshake(os.Args[2])
-		msg := make([]byte, 0)
-		msg = append(msg, 19)
-		protocol := []byte("BitTorrent protocol")
-		msg = append(msg, protocol...)
-		reserved := make([]byte, 8)
-		msg = append(msg, reserved...)
+		mp, err := decoder.readDict()
+		if err != nil {
+			fmt.Println(err)
+			os.Exit(1)
+		}
 
-		msg = append(msg, info_hash...)
-		msg = append(msg, peer_id...)
-		_, buff := sendHandshake(ipaddr, msg)
+		_, buff := sendHandshake(ipaddr, mp)
 
 		fmt.Printf("Peer ID: %s\n", hex.EncodeToString(buff[48:]))
 
@@ -370,175 +422,164 @@ func main() {
 
 		torrentFile := os.Args[4]
 		index, _ := strconv.Atoi(os.Args[5])
-		peerBytes, _, _ := getHandshake(torrentFile)
-		ipaddr := printPeer(peerBytes[12:18])
-		fmt.Println(ipaddr)
-
 		fd, err := os.Open(torrentFile)
 		if err != nil {
-			fmt.Println(err)
-			os.Exit(1)
+			panic(err)
 		}
 		defer fd.Close()
 		decoder := NewDecoder(fd)
 		b, _ := decoder.ReadByte()
-		if b == 'd' {
+		if b != 'd' {
+			fmt.Println("not a dict")
+			panic("owww...")
+		}
 
-			mp, err := decoder.readDict()
+		mp, err := decoder.readDict()
+		if err != nil {
+			fmt.Println(err)
+			os.Exit(1)
+		}
+		info := toStruct(mp)
+		peer_id := make([]byte, 20)
+		rand.Read(peer_id)
+		h := sha1.New()
+		err = bencode.Marshal(h, info)
+		if err != nil {
+			fmt.Print(err)
+			os.Exit(1)
+		}
+		info_hash := h.Sum(nil)
+		peerBytes := discoverPeers(mp, peer_id, info_hash)
+		ipaddr := printPeer(peerBytes[:6])
+
+		conn, buff := sendHandshake(ipaddr, mp)
+		fmt.Println(string(buff))
+
+		tmp := make([]byte, 16)
+		// read bitfield message
+		n, err := conn.Read(tmp)
+		if err != nil {
+			fmt.Println(err)
+			os.Exit(1)
+		}
+		fmt.Printf("read %d bytes\n", n)
+		fmt.Println(tmp[:n])
+		// send intereseted
+		interested := make([]byte, 4)
+		binary.BigEndian.PutUint32(interested, 1)
+		interested = append(interested, 2)
+		conn.Write(interested)
+
+		// wait for unchoke
+		n, err = conn.Read(tmp)
+		if err != nil {
+			fmt.Println(err)
+			os.Exit(1)
+		}
+		fmt.Printf("%d bytes read\n", n)
+		fmt.Println(tmp[:n])
+
+		// send request message
+
+		length := info.TorrentInfo.PieceLength
+		if index == info.TorrentInfo.Len-1 {
+			length = info.TorrentInfo.InfoLength % info.TorrentInfo.PieceLength
+		}
+		blockSize := 16 * 1024
+
+		blocks := int(math.Ceil(float64(length) / float64(blockSize)))
+
+		ans := make([]byte, 0)
+		for i := 0; i < blocks; i++ {
+
+			request := make([]byte, 4)
+			binary.BigEndian.PutUint32(request, 13)
+			request = append(request, 6)
+			buff := make([]byte, 4)
+			binary.BigEndian.PutUint32(buff, uint32(index))
+			request = append(request, buff...)
+			binary.BigEndian.PutUint32(buff, uint32(i*blockSize))
+			request = append(request, buff...)
+			if i == blocks-1 {
+				left := length - (i * blockSize)
+				binary.BigEndian.PutUint32(buff, uint32(left))
+
+			} else {
+				binary.BigEndian.PutUint32(buff, uint32(blockSize))
+			}
+
+			request = append(request, buff...)
+
+			_, err := conn.Write(request)
 			if err != nil {
 				fmt.Println(err)
 				os.Exit(1)
 			}
-			// infoMp, ok := mp["info"].(map[string]interface{})
 
-			// if !ok {
-			// 	fmt.Println("something went wrong!")
-			// 	os.Exit(1)
-			// }
-
-			info := toStruct(mp)
-
-			_, info_hash, peer_id := getHandshake(torrentFile)
-			msg := make([]byte, 0)
-			msg = append(msg, 19)
-			protocol := []byte("BitTorrent protocol")
-			msg = append(msg, protocol...)
-			reserved := make([]byte, 8)
-			msg = append(msg, reserved...)
-
-			msg = append(msg, info_hash...)
-			msg = append(msg, peer_id...)
-			conn, buff := sendHandshake(ipaddr, msg)
-			fmt.Println(string(buff))
-
-			// fmt.Println(string(buff))
-			tmp := make([]byte, 16)
-			// read bitfield message
-			n, err := conn.Read(tmp)
+			resBuf := make([]byte, 4)
+			_, err = conn.Read(resBuf)
+			if err != nil {
+				fmt.Println("error reading prefix length", err)
+				os.Exit(1)
+			}
+			respLength := binary.BigEndian.Uint32(resBuf)
+			resMesType := make([]byte, 1)
+			n, err = conn.Read(resMesType)
 			if err != nil {
 				fmt.Println(err)
 				os.Exit(1)
 			}
-			fmt.Printf("read %d bytes\n", n)
-			fmt.Println(tmp[:n])
-			// send intereseted
-			interested := make([]byte, 4)
-			binary.BigEndian.PutUint32(interested, 1)
-			interested = append(interested, 2)
-			conn.Write(interested)
+			if resMesType[0] != 7 {
+				fmt.Printf("invalid message with code %d\n", resMesType[0])
+				panic("bruhhh")
+			}
+			newBuff := make([]byte, respLength-1)
 
-			// wait for unchoke
-			n, err = conn.Read(tmp)
+			n, err = io.ReadFull(conn, newBuff)
+
 			if err != nil {
 				fmt.Println(err)
 				os.Exit(1)
 			}
 			fmt.Printf("%d bytes read\n", n)
-			fmt.Println(tmp[:n])
-
-			// send request message
-
-			length := info.TorrentInfo.PieceLength
-			if index == info.TorrentInfo.Len-1 {
-				length = info.TorrentInfo.InfoLength % info.TorrentInfo.PieceLength
-			}
-			blockSize := 16 * 1024
-
-			blocks := int(math.Ceil(float64(length) / float64(blockSize)))
-
-			ans := make([]byte, 0)
-			for i := 0; i < blocks; i++ {
-
-				request := make([]byte, 4)
-				binary.BigEndian.PutUint32(request, 13)
-				request = append(request, 6)
-				buff := make([]byte, 4)
-				binary.BigEndian.PutUint32(buff, uint32(index))
-				request = append(request, buff...)
-				binary.BigEndian.PutUint32(buff, uint32(i*blockSize))
-				request = append(request, buff...)
-				if i == blocks-1 {
-					left := length - (i * blockSize)
-					binary.BigEndian.PutUint32(buff, uint32(left))
-
-				} else {
-					binary.BigEndian.PutUint32(buff, uint32(blockSize))
-				}
-
-				request = append(request, buff...)
-
-				_, err := conn.Write(request)
-				if err != nil {
-					fmt.Println(err)
-					os.Exit(1)
-				}
-
-				resBuf := make([]byte, 4)
-				_, err = conn.Read(resBuf)
-				if err != nil {
-					fmt.Println("error reading prefix length", err)
-					os.Exit(1)
-				}
-				respLength := binary.BigEndian.Uint32(resBuf)
-				resMesType := make([]byte, 1)
-				n, err = conn.Read(resMesType)
-				if err != nil {
-					fmt.Println(err)
-					os.Exit(1)
-				}
-				if resMesType[0] != 7 {
-					fmt.Printf("invalid message with code %d\n", resMesType[0])
-					panic("bruhhh")
-				}
-				newBuff := make([]byte, respLength-1)
-
-				n, err = io.ReadFull(conn, newBuff)
-
-				if err != nil {
-					fmt.Println(err)
-					os.Exit(1)
-				}
-				fmt.Printf("%d bytes read\n", n)
-				ans = append(ans, newBuff[8:]...)
-
-			}
-			h := sha1.New()
-			n, err = h.Write(ans)
-			if err != nil {
-				fmt.Println(err)
-				os.Exit(1)
-			}
-			fmt.Println(n, "bytes read")
-
-			pieces := info.TorrentInfo.Pieces.(string)
-			pieceHash := []byte(pieces)
-			currPiece := pieceHash[index*20 : (index+1)*20]
-			fmt.Println(hex.EncodeToString(h.Sum(nil)))
-			fmt.Println(hex.EncodeToString(currPiece))
-
-			if !bytes.Equal(h.Sum(nil), currPiece) {
-				fmt.Println("Hashes don't match")
-			} else {
-				fmt.Println("Hurray!!!")
-			}
-			filePath := os.Args[3]
-			fd, err := os.Create(filePath)
-			if err != nil {
-				fmt.Println(err)
-				os.Exit(1)
-			}
-			n, err = fd.Write(ans)
-			if err != nil {
-				fmt.Println(err)
-				os.Exit(1)
-			}
-			fmt.Printf("wrote %d bytes\n", n)
+			ans = append(ans, newBuff[8:]...)
 
 		}
+		h = sha1.New()
+		n, err = h.Write(ans)
+		if err != nil {
+			fmt.Println(err)
+			os.Exit(1)
+		}
+		fmt.Println(n, "bytes read")
+
+		pieces := info.TorrentInfo.Pieces.(string)
+		pieceHash := []byte(pieces)
+		currPiece := pieceHash[index*20 : (index+1)*20]
+		fmt.Println(hex.EncodeToString(h.Sum(nil)))
+		fmt.Println(hex.EncodeToString(currPiece))
+
+		if !bytes.Equal(h.Sum(nil), currPiece) {
+			fmt.Println("Hashes don't match")
+		} else {
+			fmt.Println("Hurray!!!")
+		}
+		filePath := os.Args[3]
+		fd, err = os.Create(filePath)
+		if err != nil {
+			fmt.Println(err)
+			os.Exit(1)
+		}
+		n, err = fd.Write(ans)
+		if err != nil {
+			fmt.Println(err)
+			os.Exit(1)
+		}
+		fmt.Printf("wrote %d bytes\n", n)
+
 	} else if command == "download" {
 
 		torrentFile := os.Args[4]
-		peerBytes, _, _ := getHandshake(torrentFile)
 
 		fd, err := os.Open(torrentFile)
 		if err != nil {
@@ -551,12 +592,12 @@ func main() {
 			fmt.Println("wrong bencoded .torrent file")
 			return
 		}
-
 		mp, err := decoder.readDict()
 		if err != nil {
 			panic(err)
 		}
 
+		inMp := mp["info"].(map[string]interface{})
 		info := toStruct(mp)
 
 		err = os.Mkdir("pieces", os.ModePerm)
@@ -569,6 +610,16 @@ func main() {
 
 		wg := sync.WaitGroup{}
 		peers := make([]string, 0)
+		peer_id := make([]byte, 20)
+		rand.Read(peer_id)
+		h := sha1.New()
+		err = bencode.Marshal(h, inMp)
+		if err != nil {
+			fmt.Print(err)
+			os.Exit(1)
+		}
+		info_hash := h.Sum(nil)
+		peerBytes := discoverPeers(mp, peer_id, info_hash)
 
 		for i := 0; i < len(peerBytes); i = i + 6 {
 
@@ -584,18 +635,8 @@ func main() {
 			go func(wg *sync.WaitGroup) {
 				defer wg.Done()
 
-				_, info_hash, peer_id := getHandshake(torrentFile)
-				msg := make([]byte, 0)
-				msg = append(msg, 19)
-				protocol := []byte("BitTorrent protocol")
-				msg = append(msg, protocol...)
-				reserved := make([]byte, 8)
-				msg = append(msg, reserved...)
-
-				msg = append(msg, info_hash...)
-				msg = append(msg, peer_id...)
-				ipaddr := peers[i%len(peers)]
-				conn, buff := sendHandshake(ipaddr, msg)
+				peer := peers[i%len(peers)]
+				conn, buff := sendHandshake(peer, mp)
 				fmt.Println(string(buff))
 				// fmt.Println(string(buff))
 				tmp := make([]byte, 16)
@@ -747,7 +788,7 @@ func downloadPiece(conn net.Conn, index int, info Torrent) []byte {
 	if !bytes.Equal(h.Sum(nil), currPiece) {
 		fmt.Println("Hashes don't match")
 	} else {
-		fmt.Println("Hurray!!!")
+		fmt.Println("Piece hash matched")
 	}
 	fd, err := os.Create(fmt.Sprintf("%s%d", "pieces/piece", index))
 	fd.Write(ans)
