@@ -4,11 +4,9 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
-	"io"
 	"os"
 	"strconv"
 	"strings"
-	"sync"
 
 	"github.com/vansh845/smoltorrent/internal/decoder"
 	"github.com/vansh845/smoltorrent/internal/peer"
@@ -102,157 +100,12 @@ func main() {
 
 		torrentFile := os.Args[4]
 		index, _ := strconv.Atoi(os.Args[5])
-		torrent, err := torrent.NewTorrent(torrentFile)
-		if err != nil {
-			panic(err)
-		}
-		peers, err := torrent.DiscoverPeers()
-		if err != nil {
-			panic(err)
-		}
-		infoHash, err := torrent.InfoHash()
-		if err != nil {
-			panic(err)
-		}
-		peer := peers[0]
-
-		//make a tcp connection with peer
-		err = peer.Connect()
-		if err != nil {
-			panic(err)
-		}
-		//send handshake
-		buff := peer.SendHandshake(infoHash)
-		fmt.Println(buff)
-
-		//wait for bitfield
-		res, err := peer.WaitForMessage(BITFIELD)
-		if err != nil {
-			panic(err)
-		}
-
-		fmt.Println(res)
-		// send intereseted
-		err = peer.SendMessage(INTERESTED, nil)
-		if err != nil {
-			panic(err)
-		}
-
-		// wait for unchoke
-		res, err = peer.WaitForMessage(UNCHOKE)
-		if err != nil {
-			panic(err)
-		}
-
-		fmt.Println(res)
-		// send request message
-
-		infoHash, err = torrent.InfoHash()
-		if err != nil {
-			panic(err)
-		}
-		length := torrent.Info.Piece.Length
-		if index == torrent.Info.Piece.Count-1 {
-			length = torrent.Info.Length % torrent.Info.Piece.Length
-		}
-		piece := peer.DownloadPiece([]byte(torrent.Info.Piece.Hashes), length, index)
-
-		filePath := os.Args[3]
-		fd, err := os.Create(filePath)
-		if err != nil {
-			fmt.Println(err)
-			os.Exit(1)
-		}
-		_, err = fd.Write(piece)
-		if err != nil {
-			fmt.Println(err)
-			os.Exit(1)
-		}
+		torrent.HandleDownloadPiece(torrentFile, index)
 	case "download":
 
 		torrentFile := os.Args[4]
+		torrent.HandleDownloadFile(torrentFile)
 
-		torrent, err := torrent.NewTorrent(torrentFile)
-		if err != nil {
-			panic(err)
-		}
-
-		infoHash, err := torrent.InfoHash()
-		if err != nil {
-			panic(err)
-		}
-		err = os.Mkdir("pieces", os.ModePerm)
-		if err != nil {
-			if !os.IsExist(err) {
-				panic(err)
-			}
-		}
-
-		wg := sync.WaitGroup{}
-		peers, err := torrent.DiscoverPeers()
-		if err != nil {
-			panic(err)
-		}
-		fmt.Println(peers)
-		for i := 0; i < torrent.Info.Piece.Count; i++ {
-			wg.Add(1)
-			go func(wg *sync.WaitGroup) {
-				defer wg.Done()
-
-				peer := peers[i%len(peers)]
-				err = peer.Connect()
-				if err != nil {
-					panic(err)
-				}
-				//send handshake
-				buff := peer.SendHandshake(infoHash)
-				fmt.Println(string(buff))
-
-				//wait for bitfield
-				res, err := peer.WaitForMessage(BITFIELD)
-				if err != nil {
-					panic(err)
-				}
-
-				fmt.Println(res)
-				// send intereseted
-				err = peer.SendMessage(INTERESTED, nil)
-				if err != nil {
-					panic(err)
-				}
-
-				fmt.Println(res)
-				// wait for unchoke
-				res, err = peer.WaitForMessage(UNCHOKE)
-				if err != nil {
-					panic(err)
-				}
-
-				fmt.Println(res)
-				length := torrent.Info.Piece.Length
-				if i == torrent.Info.Piece.Count-1 {
-					length = torrent.Info.Length % torrent.Info.Piece.Length
-				}
-				peer.DownloadPiece([]byte(torrent.Info.Piece.Hashes), length, i)
-			}(&wg)
-		}
-		wg.Wait()
-		files, err := os.ReadDir("pieces")
-		if err != nil {
-			panic(err)
-		}
-		finalPiece, _ := os.OpenFile(os.Args[3], os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
-		for _, x := range files {
-			p, err := os.Open(fmt.Sprintf("pieces/%s", x.Name()))
-			if err != nil {
-				panic(err)
-			}
-			_, err = io.Copy(finalPiece, p)
-			if err != nil {
-				panic(err)
-			}
-
-		}
 	default:
 		fmt.Println("command not found")
 	}
