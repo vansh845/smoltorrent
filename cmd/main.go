@@ -35,9 +35,8 @@ func main() {
 
 	command := os.Args[1]
 
-	if command == "decode" {
-		// Uncomment this block to pass the first stage
-		//
+	switch command {
+	case "decode":
 		bencodedValue := os.Args[2]
 
 		decoded, err := decoder.DecodeBencode(strings.NewReader(bencodedValue))
@@ -48,7 +47,7 @@ func main() {
 
 		jsonOutput, _ := json.Marshal(decoded)
 		fmt.Println(string(jsonOutput))
-	} else if command == "info" {
+	case "info":
 
 		torrentFile := os.Args[2]
 
@@ -63,8 +62,7 @@ func main() {
 		fmt.Printf("Info Hash: %x\n", infoHash)
 		fmt.Printf("Piece Length: %d\n", torrent.Info.Piece.Length)
 		fmt.Printf("Piece Hashes: %x\n", torrent.Info.Piece.Hashes)
-
-	} else if command == "peers" {
+	case "peers":
 
 		torrentFile := os.Args[2]
 		torrent, err := torrent.NewTorrent(torrentFile)
@@ -79,8 +77,7 @@ func main() {
 		for _, x := range peers {
 			fmt.Println(x.ToString())
 		}
-
-	} else if command == "handshake" {
+	case "handshake":
 
 		ipaddr := os.Args[3]
 		torrentFile := os.Args[2]
@@ -101,8 +98,7 @@ func main() {
 		buff := peer.SendHandshake(infoHash)
 
 		fmt.Printf("Peer ID: %s\n", hex.EncodeToString(buff[48:]))
-
-	} else if command == "download_piece" {
+	case "download_piece":
 
 		torrentFile := os.Args[4]
 		index, _ := strconv.Atoi(os.Args[5])
@@ -172,8 +168,7 @@ func main() {
 			fmt.Println(err)
 			os.Exit(1)
 		}
-
-	} else if command == "download" {
+	case "download":
 
 		torrentFile := os.Args[4]
 
@@ -258,8 +253,7 @@ func main() {
 			}
 
 		}
-	} else {
-		fmt.Println("Unknown command: " + command)
-		os.Exit(1)
+	default:
+		fmt.Println("command not found")
 	}
 }
