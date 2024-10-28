@@ -10,6 +10,6 @@ set -e
 tmpFile=$(mktemp)
 
 ( cd $(dirname "$0") &&
-	go build -o "$tmpFile" ./cmd/mybittorrent )
+	go build -o "$tmpFile" ./cmd/main.go )
 
 exec "$tmpFile" "$@"
