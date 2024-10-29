@@ -71,7 +71,7 @@ type Peer struct {
 func (peer *Peer) DownloadPiece(hashes []byte, length, index int) []byte {
 
 	blockSize := 16 * 1024
-  nPieces := int(float64(len(hashes))/20)
+	nPieces := int(float64(len(hashes)) / 20)
 	blocks := int(math.Ceil(float64(length) / float64(blockSize)))
 
 	piece := make([]byte, 0)
@@ -93,7 +93,7 @@ func (peer *Peer) DownloadPiece(hashes []byte, length, index int) []byte {
 		}
 
 		res, err := peer.WaitForMessage(PIECE)
-  
+
 		if err != nil {
 			panic(err)
 		}
@@ -111,7 +111,7 @@ func (peer *Peer) DownloadPiece(hashes []byte, length, index int) []byte {
 	if !bytes.Equal(h.Sum(nil), currPiece) {
 		fmt.Println("failed, hashes don't match...")
 	} else {
-  fmt.Printf("piece %d downloaded out of %d...\n",index+1,nPieces)
+		fmt.Printf("piece %d downloaded out of %d...\n", index+1, nPieces)
 	}
 	fd, err := os.Create(fmt.Sprintf("%s%d", "pieces/piece", index))
 	fd.Write(piece)
@@ -119,6 +119,9 @@ func (peer *Peer) DownloadPiece(hashes []byte, length, index int) []byte {
 
 }
 func (p *Peer) Connect() error {
+	if p.Conn != nil {
+		return nil
+	}
 	conn, err := net.Dial("tcp", p.toString())
 	if err != nil {
 		return err
@@ -176,7 +179,7 @@ func (p *Peer) SendMessage(message PeerMessage, payload []byte) error {
 	return err
 
 }
-func (peer *Peer) SendHandshake(infoHash []byte) ([]byte,error) {
+func (peer *Peer) SendHandshake(infoHash []byte) ([]byte, error) {
 
 	peerId := GeneratePeerId()
 
@@ -192,14 +195,14 @@ func (peer *Peer) SendHandshake(infoHash []byte) ([]byte,error) {
 	msg = append(msg, peerId...)
 	n, err := peer.Conn.Write(msg)
 	if err != nil {
-		return nil , err
+		return nil, err
 	}
 
 	buff := make([]byte, n)
 	n, err = peer.Conn.Read(buff)
 	if err != nil {
-		return nil , err
+		return nil, err
 	}
 
-	return buff[:n] , nil
+	return buff[:n], nil
 }
