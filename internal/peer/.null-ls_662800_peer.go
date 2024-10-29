@@ -126,6 +126,13 @@ func (peer *Peer) DownloadPiece(hashes []byte, length, index int) []byte {
 func (p *Peer) Connect() error {
 	conn, err := net.Dial("tcp", p.toString())
 	if err != nil {
+
+		if strings.Contains(err.Error(), "unsupported protocol scheme") {
+			conn, err = net.Dial("udp", p.toString())
+			if err != nil {
+				return err
+			}
+		}
 		return err
 	}
 	p.Conn = conn

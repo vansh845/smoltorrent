@@ -216,21 +216,15 @@ func NewTorrent(torrentFile string) (*Torrent, error) {
 		return nil, fmt.Errorf("no info section in %s\n", file.Name())
 	}
 	length := -1
-	for k, v := range inDict {
-		if k == "pieces" {
-			continue
-		}
-		fmt.Println(k, v)
-		files, ok := inDict[k].([]interface{})
+	for k := range inDict {
+		fmt.Println(k)
+		files, ok := dict[k].(map[string]interface{})
 		if ok {
-			for _, file := range files {
-				mpFile := file.(map[string]interface{})
-				for k, v := range mpFile {
-					if k == "length" {
-						length = v.(int)
-					}
+			fmt.Println(files)
+			for i, j := range files {
+				if i == "length" {
+					length = j.(int)
 				}
-
 			}
 		}
 	}
@@ -258,5 +252,6 @@ func NewTorrent(torrentFile string) (*Torrent, error) {
 		Info:     info,
 		mp:       inDict,
 	}
+
 	return torrent, nil
 }
