@@ -10,6 +10,8 @@ import (
 	"os"
 	"sync"
 
+	// "sync"
+
 	"github.com/jackpal/bencode-go"
 	"github.com/vansh845/smoltorrent/internal/decoder"
 	"github.com/vansh845/smoltorrent/internal/peer"
@@ -70,7 +72,6 @@ func HandleDownloadFile(torrentFile string) {
 	if err != nil {
 		panic(err)
 	}
-	fmt.Println(peers)
 	for i := 0; i < torrent.Info.Piece.Count; i++ {
 		wg.Add(1)
 		go func(wg *sync.WaitGroup) {
@@ -81,35 +82,33 @@ func HandleDownloadFile(torrentFile string) {
 			if err != nil {
 				panic(err)
 			}
-			//send handshake
-			buff := peer.SendHandshake(infoHash)
-			fmt.Println(string(buff))
-
+			_, err := peer.SendHandshake(infoHash)
+			if err != nil {
+				panic(err)
+			}
 			//wait for bitfield
-			res, err := peer.WaitForMessage(BITFIELD)
+			_, err = peer.WaitForMessage(BITFIELD)
 			if err != nil {
 				panic(err)
 			}
 
-			fmt.Println(res)
 			// send intereseted
 			err = peer.SendMessage(INTERESTED, nil)
 			if err != nil {
 				panic(err)
 			}
 
-			fmt.Println(res)
 			// wait for unchoke
-			res, err = peer.WaitForMessage(UNCHOKE)
+			_, err = peer.WaitForMessage(UNCHOKE)
 			if err != nil {
 				panic(err)
 			}
 
-			fmt.Println(res)
 			length := torrent.Info.Piece.Length
 			if i == torrent.Info.Piece.Count-1 {
 				length = torrent.Info.Length % torrent.Info.Piece.Length
 			}
+			fmt.Println("starting download of piece", i+1)
 			peer.DownloadPiece([]byte(torrent.Info.Piece.Hashes), length, i)
 		}(&wg)
 	}
@@ -128,8 +127,14 @@ func HandleDownloadFile(torrentFile string) {
 		if err != nil {
 			panic(err)
 		}
+		err = os.Remove(fmt.Sprintf("pieces/%s", x.Name()))
 
+		if err != nil {
+			panic(err)
+		}
 	}
+	fmt.Println("File downloaded...")
+
 }
 
 func GeneratePeerId() []byte {
@@ -167,7 +172,6 @@ func (tr *Torrent) DiscoverPeers() ([]peer.Peer, error) {
 	}
 	respMap := decoded.(map[string]interface{})
 	ps := respMap["peers"].(string)
-	fmt.Println(respMap)
 	peerByte := []byte(ps)
 	peers := make([]peer.Peer, 0)
 	for i := 0; i < len(peerByte); i += 6 {
@@ -179,7 +183,6 @@ func (tr *Torrent) DiscoverPeers() ([]peer.Peer, error) {
 		peers = append(peers, peer)
 
 	}
-	fmt.Println(peers)
 	return peers, nil
 }
 
@@ -216,11 +219,10 @@ func NewTorrent(torrentFile string) (*Torrent, error) {
 		return nil, fmt.Errorf("no info section in %s\n", file.Name())
 	}
 	length := -1
-	for k, v := range inDict {
+	for k := range inDict {
 		if k == "pieces" {
 			continue
 		}
-		fmt.Println(k, v)
 		files, ok := inDict[k].([]interface{})
 		if ok {
 			for _, file := range files {

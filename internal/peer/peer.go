@@ -5,7 +5,6 @@ import (
 	"crypto/rand"
 	"crypto/sha1"
 	"encoding/binary"
-	"encoding/hex"
 	"fmt"
 	"io"
 	"math"
@@ -72,10 +71,8 @@ type Peer struct {
 func (peer *Peer) DownloadPiece(hashes []byte, length, index int) []byte {
 
 	blockSize := 16 * 1024
-
+  nPieces := int(float64(len(hashes))/20)
 	blocks := int(math.Ceil(float64(length) / float64(blockSize)))
-	fmt.Println(length)
-	fmt.Println(blocks)
 
 	piece := make([]byte, 0)
 	for i := 0; i < blocks; i++ {
@@ -96,7 +93,7 @@ func (peer *Peer) DownloadPiece(hashes []byte, length, index int) []byte {
 		}
 
 		res, err := peer.WaitForMessage(PIECE)
-
+  
 		if err != nil {
 			panic(err)
 		}
@@ -110,13 +107,11 @@ func (peer *Peer) DownloadPiece(hashes []byte, length, index int) []byte {
 	}
 
 	currPiece := hashes[index*20 : (index+1)*20]
-	fmt.Println(hex.EncodeToString(h.Sum(nil)))
-	fmt.Println(hex.EncodeToString(currPiece))
 
 	if !bytes.Equal(h.Sum(nil), currPiece) {
-		fmt.Println("Hashes don't match")
+		fmt.Println("failed, hashes don't match...")
 	} else {
-		fmt.Println("Hashes matched!")
+  fmt.Printf("piece %d downloaded out of %d...\n",index+1,nPieces)
 	}
 	fd, err := os.Create(fmt.Sprintf("%s%d", "pieces/piece", index))
 	fd.Write(piece)
@@ -177,12 +172,11 @@ func (p *Peer) SendMessage(message PeerMessage, payload []byte) error {
 	}
 
 	binary.BigEndian.PutUint32(buff[:4], uint32(msgLength))
-	fmt.Println(buff)
 	_, err := p.Conn.Write(buff)
 	return err
 
 }
-func (peer *Peer) SendHandshake(infoHash []byte) []byte {
+func (peer *Peer) SendHandshake(infoHash []byte) ([]byte,error) {
 
 	peerId := GeneratePeerId()
 
@@ -198,15 +192,14 @@ func (peer *Peer) SendHandshake(infoHash []byte) []byte {
 	msg = append(msg, peerId...)
 	n, err := peer.Conn.Write(msg)
 	if err != nil {
-		panic(err)
+		return nil , err
 	}
 
 	buff := make([]byte, n)
 	n, err = peer.Conn.Read(buff)
 	if err != nil {
-		fmt.Println(err)
-		os.Exit(1)
+		return nil , err
 	}
 
-	return buff[:n]
+	return buff[:n] , nil
 }
