@@ -12,7 +12,6 @@ import (
 	"os"
 	"strconv"
 	"strings"
-	"sync"
 	"time"
 )
 
@@ -64,38 +63,10 @@ func GeneratePeerId() []byte {
 	return peerId
 }
 
-type Peers []Peer
-
-type PeerIter struct {
-	Peers *Peers
-	Curr  int
-	mx    sync.Mutex
-}
-
-func (itr *PeerIter) Next() Peer {
-	itr.mx.Lock()
-	tmp := (*itr.Peers)[itr.Curr]
-	itr.Curr = (itr.Curr + 1) / len(*itr.Peers)
-	itr.mx.Unlock()
-	return tmp
-}
-
 type Peer struct {
 	IpAddr net.IP
 	Port   string
 	Conn   net.Conn
-}
-
-func (peer *Peer) HasPiece(idx, bitfield int) bool {
-
-	binRep := fmt.Sprintf("%08b", bitfield)
-	fmt.Println(binRep)
-	if binRep[idx] == '1' {
-		fmt.Println("true")
-
-		return true
-	}
-	return false
 }
 
 func (peer *Peer) DownloadPiece(hashes []byte, length, index int) []byte {
@@ -149,6 +120,9 @@ func (peer *Peer) DownloadPiece(hashes []byte, length, index int) []byte {
 
 }
 func (p *Peer) Connect() error {
+	if p.Conn != nil {
+		return nil
+	}
 	conn, err := net.DialTimeout("tcp", p.toString(), 5*time.Second)
 	if err != nil {
 		return err

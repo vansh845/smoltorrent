@@ -10,8 +10,6 @@ import (
 	"os"
 	"sync"
 
-	// "sync"
-
 	"github.com/jackpal/bencode-go"
 	"github.com/vansh845/smoltorrent/internal/decoder"
 	"github.com/vansh845/smoltorrent/internal/peer"
@@ -69,27 +67,39 @@ func HandleDownloadFile(torrentFile string) {
 
 	wg := sync.WaitGroup{}
 	peers, err := torrent.DiscoverPeers()
+	peerItr := peer.PeerIter{
+		Peers: &peers,
+		Curr:  0,
+	}
+	fmt.Println(peers)
 	if err != nil {
 		panic(err)
 	}
+	fmt.Println(torrent.Info.Piece.Count)
 	for i := 0; i < torrent.Info.Piece.Count; i++ {
 		wg.Add(1)
 		go func(wg *sync.WaitGroup) {
 			defer wg.Done()
 
-			peer := peers[i%len(peers)]
+			peer := peerItr.Next()
 			err = peer.Connect()
 			if err != nil {
-				panic(err)
+				return
 			}
-			_, err := peer.SendHandshake(infoHash)
+			fmt.Println(peer)
+			res, err := peer.SendHandshake(infoHash)
 			if err != nil {
-				panic(err)
+				return
 			}
+			fmt.Println(res)
 			//wait for bitfield
-			_, err = peer.WaitForMessage(BITFIELD)
+			res, err = peer.WaitForMessage(BITFIELD)
 			if err != nil {
 				panic(err)
+			}
+			fmt.Println(res)
+			if !peer.HasPiece(i, int(res[0])) {
+				return
 			}
 
 			// send intereseted
@@ -99,10 +109,11 @@ func HandleDownloadFile(torrentFile string) {
 			}
 
 			// wait for unchoke
-			_, err = peer.WaitForMessage(UNCHOKE)
+			res, err = peer.WaitForMessage(UNCHOKE)
 			if err != nil {
 				panic(err)
 			}
+			fmt.Println(res)
 
 			length := torrent.Info.Piece.Length
 			if i == torrent.Info.Piece.Count-1 {
@@ -143,7 +154,7 @@ func GeneratePeerId() []byte {
 	return peerId
 }
 
-func (tr *Torrent) DiscoverPeers() ([]peer.Peer, error) {
+func (tr *Torrent) DiscoverPeers() (peer.Peers, error) {
 
 	infoHash, err := tr.InfoHash()
 	peerId := GeneratePeerId()
