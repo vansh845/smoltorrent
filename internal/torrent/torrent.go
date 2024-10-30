@@ -47,6 +47,68 @@ type Piece struct {
 	Count  int
 }
 
+func Downloaded(torrent *Torrent, peer peer.Peer, idx int, infoHash []byte) (bool, error) {
+
+	res, err := peer.SendHandshake(infoHash)
+	if err != nil {
+		return false, err
+	}
+	fmt.Println(string(res))
+	//wait for bitfield
+	res, err = peer.WaitForMessage(BITFIELD)
+	if err != nil {
+		return false, err
+	}
+	fmt.Println(string(res))
+	bitfield := []byte{}
+	for _, x := range res {
+		binRep := fmt.Sprintf("%08b", x)
+		bitfield = append(bitfield, []byte(binRep)...)
+	}
+	fmt.Println(bitfield)
+	if !peer.HasPiece(idx, string(bitfield)) {
+		return false, err
+	}
+
+	// send intereseted
+	err = peer.SendMessage(INTERESTED, nil)
+	if err != nil {
+		panic(err)
+	}
+
+	// wait for unchoke
+	res, err = peer.WaitForMessage(UNCHOKE)
+	if err != nil {
+		panic(err)
+	}
+	fmt.Println(res)
+
+	length := torrent.Info.Piece.Length
+	if idx == torrent.Info.Piece.Count-1 {
+		length = torrent.Info.Length % torrent.Info.Piece.Length
+	}
+	fmt.Println("starting download of piece", idx+1)
+	peer.DownloadPiece([]byte(torrent.Info.Piece.Hashes), length, idx)
+
+	return true, nil
+}
+
+func spawnCr(torrent *Torrent, wg *sync.WaitGroup, peerCh chan peer.Peer, i int, infoHash []byte) {
+	defer wg.Done()
+
+	peer := <-peerCh
+	err := peer.Connect()
+	if err != nil {
+		return
+	}
+	fmt.Println(peer)
+	ok, err := Downloaded(torrent, peer, i, infoHash)
+	peerCh <- peer
+	if !ok {
+		fmt.Printf("%d piece failed, trying again\n", i)
+		spawnCr(torrent, wg, peerCh, i, infoHash)
+	}
+}
 func HandleDownloadFile(torrentFile string) {
 
 	torrent, err := NewTorrent(torrentFile)
@@ -67,9 +129,9 @@ func HandleDownloadFile(torrentFile string) {
 
 	wg := sync.WaitGroup{}
 	peers, err := torrent.DiscoverPeers()
-	peerItr := peer.PeerIter{
-		Peers: &peers,
-		Curr:  0,
+	peerCh := make(chan peer.Peer, len(peers))
+	for _, peer := range peers {
+		peerCh <- peer
 	}
 	fmt.Println(peers)
 	if err != nil {
@@ -78,50 +140,7 @@ func HandleDownloadFile(torrentFile string) {
 	fmt.Println(torrent.Info.Piece.Count)
 	for i := 0; i < torrent.Info.Piece.Count; i++ {
 		wg.Add(1)
-		go func(wg *sync.WaitGroup) {
-			defer wg.Done()
-
-			peer := peerItr.Next()
-			err = peer.Connect()
-			if err != nil {
-				return
-			}
-			fmt.Println(peer)
-			res, err := peer.SendHandshake(infoHash)
-			if err != nil {
-				return
-			}
-			fmt.Println(res)
-			//wait for bitfield
-			res, err = peer.WaitForMessage(BITFIELD)
-			if err != nil {
-				panic(err)
-			}
-			fmt.Println(res)
-			if !peer.HasPiece(i, int(res[0])) {
-				return
-			}
-
-			// send intereseted
-			err = peer.SendMessage(INTERESTED, nil)
-			if err != nil {
-				panic(err)
-			}
-
-			// wait for unchoke
-			res, err = peer.WaitForMessage(UNCHOKE)
-			if err != nil {
-				panic(err)
-			}
-			fmt.Println(res)
-
-			length := torrent.Info.Piece.Length
-			if i == torrent.Info.Piece.Count-1 {
-				length = torrent.Info.Length % torrent.Info.Piece.Length
-			}
-			fmt.Println("starting download of piece", i+1)
-			peer.DownloadPiece([]byte(torrent.Info.Piece.Hashes), length, i)
-		}(&wg)
+		go spawnCr(torrent, &wg, peerCh, i, infoHash)
 	}
 	wg.Wait()
 	files, err := os.ReadDir("pieces")
@@ -154,7 +173,7 @@ func GeneratePeerId() []byte {
 	return peerId
 }
 
-func (tr *Torrent) DiscoverPeers() (peer.Peers, error) {
+func (tr *Torrent) DiscoverPeers() ([]peer.Peer, error) {
 
 	infoHash, err := tr.InfoHash()
 	peerId := GeneratePeerId()

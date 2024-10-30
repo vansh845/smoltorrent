@@ -12,7 +12,6 @@ import (
 	"os"
 	"strconv"
 	"strings"
-	"sync"
 	"time"
 )
 
@@ -64,21 +63,7 @@ func GeneratePeerId() []byte {
 	return peerId
 }
 
-type Peers []Peer
-
-type PeerIter struct {
-	Peers *Peers
-	Curr  int
-	mx    sync.Mutex
-}
-
-func (itr *PeerIter) Next() Peer {
-	itr.mx.Lock()
-	tmp := (*itr.Peers)[itr.Curr]
-	itr.Curr = (itr.Curr + 1) / len(*itr.Peers)
-	itr.mx.Unlock()
-	return tmp
-}
+type Peers chan Peer
 
 type Peer struct {
 	IpAddr net.IP
@@ -86,9 +71,8 @@ type Peer struct {
 	Conn   net.Conn
 }
 
-func (peer *Peer) HasPiece(idx, bitfield int) bool {
+func (peer *Peer) HasPiece(idx int, binRep string) bool {
 
-	binRep := fmt.Sprintf("%08b", bitfield)
 	fmt.Println(binRep)
 	if binRep[idx] == '1' {
 		fmt.Println("true")
