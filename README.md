@@ -40,8 +40,8 @@ go build
 | **Sequential & Parallel Download** | Download files efficiently across multiple peers   |
 
 ## 🛠️ ToDo
-Reconnection Support - Retry peers on partial downloads 
-Progress Tracking     - Display download status and speed 
+- Reconnection Support - Retry peers on partial downloads 
+- Progress Tracking    - Display download status and speed 
 
 ## ⚙️ How It Works
 - Parses the `.torrent` file to extract metadata and trackers.
