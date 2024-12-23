@@ -26,8 +26,6 @@ go build
 # Start downloading a torrent
 ./smoltorrent example.torrent
 
-# Monitor the download process
-./smoltorrent --status
 ```
 
 ## 🧩 Supported Functionalities
