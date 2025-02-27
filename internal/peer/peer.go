@@ -29,6 +29,14 @@ const (
 	CANCEL
 )
 
+func GetAllPeers(peers string) []Peer{
+    var res = []Peer{}
+    for i:= 0 ; i < len(peers) ; i += 6{
+        res = append(res, New([]byte(peers[i:i+6])))
+    }  
+    return res
+}
+
 func NewPeerFromString(peer string) Peer {
 	tmp := strings.Split(peer, ":")
 	ip := tmp[0]

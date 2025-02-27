@@ -30,7 +30,7 @@ const (
 
 type TrackerResponse struct{
     Interval int
-    Peers []TrackerPeer
+    Peers string
     Failure string
 }
 
@@ -127,10 +127,10 @@ func HandleDownloadFile(torrentFile string) {
 		panic(err)
 	}
 
-	// infoHash, err := torrent.InfoHash()
-	// if err != nil {
-	// 	panic(err)
-	// }
+	infoHash, err := torrent.InfoHash()
+	if err != nil {
+		panic(err)
+	}
 	err = os.Mkdir("pieces", os.ModePerm)
 	if err != nil {
 		if !os.IsExist(err) {
@@ -140,42 +140,58 @@ func HandleDownloadFile(torrentFile string) {
 
 	wg := sync.WaitGroup{}
 	peers, err := torrent.DiscoverPeers()
-	peerCh := make(chan TrackerPeer, len(peers))
+	peerCh := make(chan peer.Peer, len(peers))
 	for _, peer := range peers {
 		peerCh <- peer
 	}
-	fmt.Println(peers)
 	if err != nil {
 		panic(err)
 	}
-    // numPieces := torrent.Info.Length/torrent.Info.PieceLength
-	// for i := 0; i < numPieces ; i++ {
-	// 	wg.Add(1)
-	// 	go spawnCr(torrent, &wg, peerCh, i, infoHash)
- //        fmt.Println(d)
-	// }
+    var length = 0
+    if len(torrent.Info.Files) > 0{
+        for _,file := range torrent.Info.Files{
+            length += file.Length
+        } 
+    }
+    numPieces := length/torrent.Info.PieceLength
+	for i := 0; i < numPieces ; i++ {
+		wg.Add(1)
+		go spawnCr(torrent, &wg, peerCh, i, infoHash)
+	}
 	wg.Wait()
-	files, err := os.ReadDir("pieces")
+	pieces, err := os.ReadDir("pieces")
 	if err != nil {
 		panic(err)
 	}
-	finalPiece, _ := os.OpenFile(torrent.Info.Name, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
-	for _, x := range files {
-		p, err := os.Open(fmt.Sprintf("pieces/%s", x.Name()))
-		if err != nil {
-			panic(err)
-		}
-		_, err = io.Copy(finalPiece, p)
-		if err != nil {
-			panic(err)
-		}
-		err = os.Remove(fmt.Sprintf("pieces/%s", x.Name()))
 
-		if err != nil {
-			panic(err)
-		}
-	}
-	fmt.Println("File downloaded...")
+
+    if len(torrent.Info.Files) == 0{
+        torrent.Info.Files = append(torrent.Info.Files,File{
+            Length: length,
+            Path: []string{torrent.Info.Name},
+        })
+
+    }
+    for _,fs := range torrent.Info.Files{
+
+	    finalPiece, _ := os.OpenFile(fs.Path[0], os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
+	    for _, x := range pieces {
+	    	p, err := os.Open(fmt.Sprintf("pieces/%s", x.Name()))
+	    	if err != nil {
+	    		panic(err)
+	    	}
+	    	_, err = io.Copy(finalPiece, p)
+	    	if err != nil {
+	    		panic(err)
+	    	}
+	    	err = os.Remove(fmt.Sprintf("pieces/%s", x.Name()))
+
+	    	if err != nil {
+	    		panic(err)
+	    	}
+	    }
+	    fmt.Println("File downloaded...")
+    }
 
 }
 
@@ -185,7 +201,7 @@ func GeneratePeerId() []byte {
 	return peerId
 }
 
-func (tr *Torrent) DiscoverPeers() ([]TrackerPeer, error) {
+func (tr *Torrent) DiscoverPeers() ([]peer.Peer, error) {
 
 	infoHash, err := tr.InfoHash()
 	peerId := GeneratePeerId()
@@ -213,16 +229,38 @@ func (tr *Torrent) DiscoverPeers() ([]TrackerPeer, error) {
 	if err != nil {
 		return nil, err
 	}
-    fmt.Printf("Failure %s",decoded.Failure)
-    fmt.Printf("Interval %d",decoded.Interval)
 
-	return decoded.Peers, nil
+    
+	return peer.GetAllPeers(decoded.Peers), nil
+}
+
+func (tr *Torrent) toMap() map[string]interface{}{
+    mp := make(map[string]interface{})
+    mp["name"] = tr.Info.Name
+    mp["length"] = tr.Info.Length
+    mp["piece length"] = tr.Info.PieceLength
+    mp["pieces"] = tr.Info.Pieces
+
+    if len(tr.Info.Files) != 0{
+        files := make([]map[string]interface{},0)
+        for i:=0 ; i < len(tr.Info.Files) ; i++{
+            temp := make(map[string]interface{})
+            temp["length"] = tr.Info.Files[i].Length
+            temp["path"] = tr.Info.Files[i].Path
+            files = append(files, temp)
+        }
+        mp["files"] = files
+    }
+
+    return mp
 }
 
 func (tr *Torrent) InfoHash() ([]byte, error) {
 
 	h := sha1.New()
-	err := bencode.Marshal(h, tr.Info)
+    
+
+	err := bencode.Marshal(h,tr.toMap())
 	if err != nil {
 		return nil, err
 	}
