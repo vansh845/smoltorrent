@@ -81,9 +81,7 @@ type Peer struct {
 
 func (peer *Peer) HasPiece(idx int, binRep string) bool {
 
-	fmt.Println(binRep)
 	if binRep[idx] == '1' {
-		fmt.Println("true")
 
 		return true
 	}
@@ -131,7 +129,7 @@ func (peer *Peer) DownloadPiece(hashes []byte, length, index int) []byte {
 	currPiece := hashes[index*20 : (index+1)*20]
 
 	if !bytes.Equal(h.Sum(nil), currPiece) {
-		fmt.Println("failed, hashes don't match...")
+		fmt.Printf("piece %d failed, hashes didn't match...\n",index+1)
 	} else {
 		fmt.Printf("piece %d downloaded out of %d...\n", index+1, nPieces)
 	}

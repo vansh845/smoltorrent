@@ -62,19 +62,16 @@ func Downloaded(torrent *Torrent, peer peer.Peer, idx int, infoHash []byte) (boo
 	if err != nil {
 		return false, err
 	}
-	fmt.Println(string(res))
 	//wait for bitfield
 	res, err = peer.WaitForMessage(BITFIELD)
 	if err != nil {
 		return false, err
 	}
-	fmt.Println(string(res))
 	bitfield := []byte{}
 	for _, x := range res {
 		binRep := fmt.Sprintf("%08b", x)
 		bitfield = append(bitfield, []byte(binRep)...)
 	}
-	fmt.Println(bitfield)
 	if !peer.HasPiece(idx, string(bitfield)) {
 		return false, err
 	}
@@ -90,7 +87,6 @@ func Downloaded(torrent *Torrent, peer peer.Peer, idx int, infoHash []byte) (boo
 	if err != nil {
 		panic(err)
 	}
-	fmt.Println(res)
 
 	length := torrent.Info.PieceLength
     numPieces := torrent.Info.Length/torrent.Info.PieceLength
@@ -98,7 +94,6 @@ func Downloaded(torrent *Torrent, peer peer.Peer, idx int, infoHash []byte) (boo
 	if idx == numPieces-1 {
 		length = torrent.Info.Length % torrent.Info.PieceLength
 	}
-	fmt.Println("starting download of piece", idx+1)
 	peer.DownloadPiece([]byte(torrent.Info.Pieces), length, idx)
 
 	return true, nil
@@ -112,7 +107,6 @@ func spawnCr(torrent *Torrent, wg *sync.WaitGroup, peerCh chan peer.Peer, i int,
 	if err != nil {
 		return
 	}
-	fmt.Println(peer)
 	ok, err := Downloaded(torrent, peer, i, infoHash)
 	peerCh <- peer
 	if !ok {
@@ -147,32 +141,28 @@ func HandleDownloadFile(torrentFile string) {
 	if err != nil {
 		panic(err)
 	}
-    var length = 0
-    if len(torrent.Info.Files) > 0{
-        for _,file := range torrent.Info.Files{
-            length += file.Length
-        } 
-    }
-    numPieces := length/torrent.Info.PieceLength
-	for i := 0; i < numPieces ; i++ {
-		wg.Add(1)
-		go spawnCr(torrent, &wg, peerCh, i, infoHash)
-	}
-	wg.Wait()
-	pieces, err := os.ReadDir("pieces")
-	if err != nil {
-		panic(err)
-	}
-
-
     if len(torrent.Info.Files) == 0{
         torrent.Info.Files = append(torrent.Info.Files,File{
-            Length: length,
+            Length: torrent.Info.Length,
             Path: []string{torrent.Info.Name},
         })
 
+    }else{
+        os.Mkdir(torrent.Info.Name , os.ModePerm)
     }
     for _,fs := range torrent.Info.Files{
+        numPieces := fs.Length/torrent.Info.PieceLength
+	    for i := 0; i < numPieces ; i++ {
+	    	wg.Add(1)
+	    	go spawnCr(torrent, &wg, peerCh, i, infoHash)
+	    }
+	    wg.Wait()
+	    pieces, err := os.ReadDir("pieces")
+	    if err != nil {
+	    	panic(err)
+	    }
+
+
 
 	    finalPiece, _ := os.OpenFile(fs.Path[0], os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
 	    for _, x := range pieces {
