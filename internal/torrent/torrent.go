@@ -11,7 +11,6 @@ import (
 	"sync"
 
 	"github.com/jackpal/bencode-go"
-	"github.com/vansh845/smoltorrent/internal/decoder"
 	"github.com/vansh845/smoltorrent/internal/peer"
 )
 
@@ -29,24 +28,34 @@ const (
 	CANCEL
 )
 
-type Torrent struct {
-	Announce string
-	Info     Info
-	mp       map[string]interface{}
+type TrackerResponse struct{
+    Interval int
+    Peers []TrackerPeer
+    Failure string
 }
 
-type Info struct {
-	Length int
-	Name   string
-	Piece  Piece
+type TrackerPeer struct{
+    PeerId string `bencode:"peer id"`
+    Ip string `bencode:"ip"`
+    Port string `bencode:"port"`
 }
 
-type Piece struct {
-	Length int
-	Hashes string
-	Count  int
+type Torrent struct{
+    Announce string `bencode:"announce"`
+    Info Info `bencode:"info"`
+}
+type Info struct{
+    Files []File `bencode:"files"`
+    Length int  `bencode:"length"`
+    Name string `bencode:"name"`
+    PieceLength int  `bencode:"piece length"`
+    Pieces string `bencode:"pieces"`
 }
 
+type File struct{
+    Length int `bencode:"length"`
+    Path []string `bencode:"path"`
+}
 func Downloaded(torrent *Torrent, peer peer.Peer, idx int, infoHash []byte) (bool, error) {
 
 	res, err := peer.SendHandshake(infoHash)
@@ -83,12 +92,14 @@ func Downloaded(torrent *Torrent, peer peer.Peer, idx int, infoHash []byte) (boo
 	}
 	fmt.Println(res)
 
-	length := torrent.Info.Piece.Length
-	if idx == torrent.Info.Piece.Count-1 {
-		length = torrent.Info.Length % torrent.Info.Piece.Length
+	length := torrent.Info.PieceLength
+    numPieces := torrent.Info.Length/torrent.Info.PieceLength
+
+	if idx == numPieces-1 {
+		length = torrent.Info.Length % torrent.Info.PieceLength
 	}
 	fmt.Println("starting download of piece", idx+1)
-	peer.DownloadPiece([]byte(torrent.Info.Piece.Hashes), length, idx)
+	peer.DownloadPiece([]byte(torrent.Info.Pieces), length, idx)
 
 	return true, nil
 }
@@ -116,10 +127,10 @@ func HandleDownloadFile(torrentFile string) {
 		panic(err)
 	}
 
-	infoHash, err := torrent.InfoHash()
-	if err != nil {
-		panic(err)
-	}
+	// infoHash, err := torrent.InfoHash()
+	// if err != nil {
+	// 	panic(err)
+	// }
 	err = os.Mkdir("pieces", os.ModePerm)
 	if err != nil {
 		if !os.IsExist(err) {
@@ -129,7 +140,7 @@ func HandleDownloadFile(torrentFile string) {
 
 	wg := sync.WaitGroup{}
 	peers, err := torrent.DiscoverPeers()
-	peerCh := make(chan peer.Peer, len(peers))
+	peerCh := make(chan TrackerPeer, len(peers))
 	for _, peer := range peers {
 		peerCh <- peer
 	}
@@ -137,11 +148,12 @@ func HandleDownloadFile(torrentFile string) {
 	if err != nil {
 		panic(err)
 	}
-	fmt.Println(torrent.Info.Piece.Count)
-	for i := 0; i < torrent.Info.Piece.Count; i++ {
-		wg.Add(1)
-		go spawnCr(torrent, &wg, peerCh, i, infoHash)
-	}
+    // numPieces := torrent.Info.Length/torrent.Info.PieceLength
+	// for i := 0; i < numPieces ; i++ {
+	// 	wg.Add(1)
+	// 	go spawnCr(torrent, &wg, peerCh, i, infoHash)
+ //        fmt.Println(d)
+	// }
 	wg.Wait()
 	files, err := os.ReadDir("pieces")
 	if err != nil {
@@ -173,7 +185,7 @@ func GeneratePeerId() []byte {
 	return peerId
 }
 
-func (tr *Torrent) DiscoverPeers() ([]peer.Peer, error) {
+func (tr *Torrent) DiscoverPeers() ([]TrackerPeer, error) {
 
 	infoHash, err := tr.InfoHash()
 	peerId := GeneratePeerId()
@@ -196,30 +208,21 @@ func (tr *Torrent) DiscoverPeers() ([]peer.Peer, error) {
 		return nil, err
 	}
 
-	decoded, err := decoder.DecodeBencode(resp.Body)
+    var decoded = TrackerResponse{}
+	err = bencode.Unmarshal(resp.Body,&decoded)
 	if err != nil {
 		return nil, err
 	}
-	respMap := decoded.(map[string]interface{})
-	ps := respMap["peers"].(string)
-	peerByte := []byte(ps)
-	peers := make([]peer.Peer, 0)
-	for i := 0; i < len(peerByte); i += 6 {
+    fmt.Printf("Failure %s",decoded.Failure)
+    fmt.Printf("Interval %d",decoded.Interval)
 
-		peer := peer.New(peerByte[i : i+6])
-		if peer.IpAddr.String() == "0.0.0.0" {
-			continue
-		}
-		peers = append(peers, peer)
-
-	}
-	return peers, nil
+	return decoded.Peers, nil
 }
 
 func (tr *Torrent) InfoHash() ([]byte, error) {
 
 	h := sha1.New()
-	err := bencode.Marshal(h, tr.mp)
+	err := bencode.Marshal(h, tr.Info)
 	if err != nil {
 		return nil, err
 	}
@@ -228,67 +231,14 @@ func (tr *Torrent) InfoHash() ([]byte, error) {
 
 func NewTorrent(torrentFile string) (*Torrent, error) {
 
+    var torrent = Torrent{}
 	file, err := os.Open(torrentFile)
 	if err != nil {
 		return nil, err
 	}
-	defer file.Close()
+    defer file.Close()
+    
+    bencode.Unmarshal(file,&torrent)
 
-	decoder := decoder.NewDecoder(file)
-	output, err := decoder.Decode()
-	if err != nil {
-		return nil, err
-	}
-
-	dict, ok := output.(map[string]interface{})
-	if !ok {
-		return nil, fmt.Errorf("%s is not a bencoded dictionary\n", file.Name())
-	}
-	inDict, ok := dict["info"].(map[string]interface{})
-	if !ok {
-		return nil, fmt.Errorf("no info section in %s\n", file.Name())
-	}
-	length := -1
-	for k := range inDict {
-		if k == "pieces" {
-			continue
-		}
-		files, ok := inDict[k].([]interface{})
-		if ok {
-			for _, file := range files {
-				mpFile := file.(map[string]interface{})
-				for k, v := range mpFile {
-					if k == "length" {
-						length = v.(int)
-					}
-				}
-
-			}
-		}
-	}
-	pl := inDict["piece length"].(int)
-	pieceHash := inDict["pieces"].(string)
-	count := len(pieceHash) / 20
-
-	var piece Piece = Piece{
-		Length: pl,
-		Hashes: pieceHash,
-		Count:  count,
-	}
-
-	if length == -1 {
-		length = inDict["length"].(int)
-	}
-	var info Info = Info{
-		Length: length,
-		Name:   inDict["name"].(string),
-		Piece:  piece,
-	}
-
-	torrent := &Torrent{
-		Announce: dict["announce"].(string),
-		Info:     info,
-		mp:       inDict,
-	}
-	return torrent, nil
+	return &torrent, nil
 }
